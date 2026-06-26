@@ -1,0 +1,55 @@
+"""
+Provider Hierarchy Mapping Definitions — Adapted from provider_hierarchy_7.12 JSON Schema
+Matches provider locations and relationships from EDI 274 Directory structured JSON.
+"""
+
+HIERARCHY_PROVIDER_MAPPING_DEFINITION = {
+    "name": "Provider Hierarchy Schema Mapping",
+    "mapping_type": "only_mapped",
+    "expressions": {
+        "PROVIDERID":        "detail.interchange_control_header_loop.interchange_control_header_NM1[2].identifier",
+        "PROVIDERLASTNAME":  "detail.interchange_control_header_loop.interchange_control_header_NM1[2].name",
+        "PROVIDERNPI":       "detail.interchange_control_header_loop.interchange_control_header_NM1[2].identifier",
+        "LOCATIONADDRESS1":  "detail.interchange_control_header_loop.interchange_control_header_N3.address_line_1",
+        "LOCATIONCITY":      "detail.interchange_control_header_loop.interchange_control_header_N4.city",
+        "LOCATIONSTATE":     "detail.interchange_control_header_loop.interchange_control_header_N4.state",
+        "LOCATIONZIP":       "detail.interchange_control_header_loop.interchange_control_header_N4.zip_code",
+        "LOCATIONTIN":       "detail.interchange_control_header_loop.interchange_control_header_REF[0].champus_id",
+        "LOCATIONIDTYPE":    "detail.interchange_control_header_loop.interchange_control_header_NM1[2].entity_identifier_code",
+        "LOCATIONID":        "detail.interchange_control_header_loop.interchange_control_header_NM1[2].identifier",
+        "LOCATIONDESC":      "detail.interchange_control_header_loop.interchange_control_header_NM1[2].name",
+        "LOCATIONRANKING":   "detail.interchange_control_header_loop.interchange_control_header_HL[2].hl03_03",
+        "LOCATIONGROUPID":   "detail.interchange_control_header_loop.interchange_control_header_NM1[0].submitter_id",
+        "COUNTYCODE":        "detail.unmapped",
+        "PHONENUMBER":       "detail.interchange_control_header_loop.interchange_control_header_PER[1].per04_04",
+        "FAXNUMBER":         "detail.unmapped",
+        "CONTACTPERSON":     "detail.interchange_control_header_loop.interchange_control_header_PER[1].per02_02",
+        "DONOTCHASE":        "detail.unmapped",
+        "TIER2IDTYPE":       "detail.unmapped",
+        "TIER2ID":           "detail.unmapped",
+        "TIER2DESC":         "detail.unmapped",
+        "TIER2ADDRESS1":     "detail.unmapped",
+        "TIER2ADDRESS2":     "detail.unmapped",
+        "TIER2CITY":         "detail.unmapped",
+        "TIER2STATE":        "detail.unmapped",
+        "TIER2ZIP":          "detail.unmapped",
+        "TIER3IDTYPE":       "detail.unmapped",
+        "TIER3ID":           "detail.unmapped",
+        "TIER3DESC":         "detail.unmapped",
+        "TIER3ADDRESS1":     "detail.unmapped",
+        "TIER3ADDRESS2":     "detail.unmapped",
+        "TIER3CITY":         "detail.unmapped",
+        "TIER3STATE":        "detail.unmapped",
+        "TIER3ZIP":          "detail.unmapped",
+        "TIER4IDTYPE":       "detail.unmapped",
+        "TIER4ID":           "detail.unmapped",
+        "TIER4DESC":         "detail.unmapped",
+        "TIER4ADDRESS1":     "detail.unmapped",
+        "TIER4ADDRESS2":     "detail.unmapped",
+        "TIER4CITY":         "detail.unmapped",
+        "TIER4STATE":        "detail.unmapped",
+        "TIER4ZIP":          "detail.unmapped",
+        "STARTDATE":         "detail.interchange_control_header_loop.interchange_control_header_DTP[0].date_value",
+        "ENDDATE":           "detail.interchange_control_header_loop.interchange_control_header_DTP[1].date_value"
+    }
+}

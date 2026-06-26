@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+temp/
+source/274/inprogress/
+source/274/processed/
+source/274/failed/
+logs/
