@@ -11,3 +11,4 @@ derby.log
 Volumes/
 .ipynb_checkpoints/
 catalog/
+local_setup.py
