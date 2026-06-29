@@ -5,3 +5,9 @@ source/274/inprogress/
 source/274/processed/
 source/274/failed/
 logs/
+spark-warehouse/
+metastore_db/
+derby.log
+Volumes/
+.ipynb_checkpoints/
+catalog/
