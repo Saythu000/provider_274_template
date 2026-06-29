@@ -335,6 +335,106 @@ Below is the detailed specification of how each key column behaves under the Sil
 
 ---
 
+### 4.2 Detailed Gold dimprovider Columns & Definitions
+
+Below is the detailed specification of how each key column is mapped, structured, and behavioral in the Gold `dimprovider` master table:
+
+---
+
+#### 1. providerKey
+*   **Source**: Spark-generated `HASH()` of all mapped column values concatenated with a pipe (`|`) character.
+*   **Purpose**: acts as the surrogate key for the Slowly Changing Dimension (SCD) Type 2 logic. Used to match and identify updates (if a doctor's address or phone changes, the key changes, triggering history expiration).
+
+---
+
+#### 2. providerID
+*   **Source**: Mapped directly from `pgr.PROVIDERID` in Silver.
+    *   *Rendering Doctor*: Doctor's individual NPI (e.g. `'1982736452'`).
+    *   *Billing Clinic*: Clinic's Tax ID / `LOCATIONTIN` (e.g. `'123456789'`).
+    *   *Linkage Relationship*: Doctor's NPI.
+*   **Purpose**: Serves as the permanent business primary key to track the unique entity or linkage relationship. Used in `MERGE` scripts as the match key.
+
+---
+
+#### 3. effectiveStartDate, effectiveEndDate, and isCurrent
+*   **Source**: Managed dynamically by the SCD Type 2 merge logic:
+    *   `effectiveStartDate` = `CURRENT_DATE()` on insert.
+    *   `effectiveEndDate` = `null` initially (updated to `current_date()` if updated).
+    *   `isCurrent` = `1` initially (updated to `0` if updated).
+*   **Purpose**: Reconstructs provider directory history. It allows time-travel reporting to verify the doctor's active details on the exact date a claim was made.
+
+---
+
+#### 4. npi & tin
+*   **Source**:
+    *   `npi`: Mapped from `pgr.PROVIDERNPI` in Silver.
+    *   `tin`: Mapped from `pgr.LOCATIONTIN` in Silver.
+*   **Purpose**: Standard healthcare regulatory identifiers used by claim engines to match claims to the master registry.
+
+---
+
+#### 5. lastName, firstName, and middleName
+*   **Source**:
+    *   `lastName`: Mapped directly from `pgr.PROVIDERLASTNAME` (holds Doctor Full Name or Clinic Name).
+    *   `firstName` & `middleName`: Projected statically as `NULL`.
+*   **Purpose**: Holds the display name of the provider. First and middle names are unmapped (`NULL`) under the 274-Only design to prevent dependencies on claim transaction files (837 feeds).
+
+---
+
+#### 6. phoneNumber & Addresses (address1, address2, city, state, zipCode)
+*   **Source**: Mapped directly from matching Silver columns:
+    *   `phoneNumber` $\leftarrow$ `pgr.PHONENUMBER`
+    *   `address1` $\leftarrow$ `pgr.LOCATIONADDRESS1`
+    *   `address2` $\leftarrow$ `pgr.LOCATIONADDRESS2`
+    *   `city` $\leftarrow$ `pgr.LOCATIONCITY`
+    *   `state` $\leftarrow$ `pgr.LOCATIONSTATE`
+    *   `zipCode` $\leftarrow$ `pgr.LOCATIONZIP`
+*   **Purpose**: Physical contact channels and locations used by search directories and geocoding engines.
+
+---
+
+#### 7. practiceCode & practiceName
+*   **Source**: Mapped from the Silver table's `LOCATIONID` and `LOCATIONDESC`.
+*   **Purpose**: Links the provider row to the specific clinic group or office location where the services are rendered.
+
+---
+
+#### 8. providerOrgCode & providerOrgName
+*   **Source**: Mapped from the Silver table's `LOCATIONTIN` and `LOCATIONDESC` (referring to the parent Clinic Group).
+*   **Purpose**: Identifies the parent Provider Organization (PO or IPA group) that owns the practice locations for corporate billing and reporting.
+
+---
+
+#### 9. providerSpecialtyDescription
+*   **Source**: Mapped via `CASE WHEN pgr.PROVIDERNPI IS NULL THEN '' ELSE pgr.LOCATIONDESC END`.
+*   **Purpose**: Provides a description of the provider's clinic network or specialty group association.
+
+---
+
+#### 10. Specialty & Taxonomy Code Placeholders
+*   **Columns**: `taxonomyCode1-5`, `hpSpecialtyCode1-5`, `advProviderSpecialtyCode1-5`
+*   **Source**: Projected statically as `NULL`.
+*   **Purpose**: Under the 274-Only design, specialty code lookups are claim-dependent (837-dependent) features. To remain self-contained, they are set to `NULL` in the directory dimension.
+
+---
+
+#### 11. Clinical & Contract Placeholders
+*   **Columns**: `isPrescribePrivilege`, `providerDEA`, `payerID`, `isContracted`, `providerHAI`, `hospitalID`
+*   **Source**: Mapped as `NULL`.
+*   **Purpose**: Placeholders for tracking prescription privileges, DEA registration numbers, contracted statuses, and hospital affiliations, which are managed outside of the demographics Loop.
+
+---
+
+#### 12. Quality Reporting & Program Columns
+*   **Source**:
+    *   `isExcludedFromProviderReporting` & `altProvReporting1-10`: Set to `NULL`.
+    *   `programType` = `'Targeted'` (statically initialized).
+    *   `practiceTargetedStatus` = `'New - Targeted'` (statically initialized).
+    *   `ProductID` & `ProviderType`: Set to `NULL`.
+*   **Purpose**: Custom analytical indicators used to exclude certain research/retired doctors from regulatory reports, and track active clinical quality programs.
+
+---
+
 ## 5. EDI 274 Envelope & Segment Reference Guide
 
 Healthcare directory files contain structural envelope segments to bundle data safely, followed by transaction segments that map out the provider networks.
