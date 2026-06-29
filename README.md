@@ -166,49 +166,172 @@ Below is the definition of all **46 columns** processed in the Bronze and Silver
 | `FILE_LAYOUT_DESCRIPTION` | string | Description of file layout (statically set to `'Standard274'`). | Static Configuration |
 | `HashKey` | string | Unique SHA-256 signature of the row content. | Spark-generated Hash of all columns |
 
-### 4.1 Detailed Column Casing and Value Mapping Across the 3-Row Split
+### 4.1 Detailed Column-by-Column Deep Dive (Source, Split Behavior, and Purpose)
 
-In the Silver layer, each parsed record is split into three distinct rows (`rendering`, `billing`, and `rendering to billing`). Below is the behavior of key columns across these three rows:
+Below is the detailed specification of how each key column behaves under the Silver 1-to-3 record explosion:
 
-#### 1. Core Identifiers & Names
-*   **`PROVIDERID`**:
-    *   *Rendering Row*: Mapped to the Doctor's individual NPI (e.g. `1982736452`).
-    *   *Billing Row*: Mapped to the Clinic Group's Tax ID / `LOCATIONTIN` (e.g. `123456789`).
-    *   *Linkage Row*: Mapped to the Doctor's individual NPI.
-*   **`PROVIDERLASTNAME`**:
-    *   *Rendering Row*: Dr. John M. Doe (Doctor's combined Full Name).
-    *   *Billing Row*: Johns Hopkins Hospital (coalesced with `TIER2DESC`).
-    *   *Linkage Row*: Dr. John M. Doe.
-*   **`PROVIDERNPI`**:
-    *   *Rendering Row*: Doctor's NPI (e.g. `1982736452`).
-    *   *Billing Row*: Organization's Group NPI (`TIER2ID` e.g. `1992837465`).
-    *   *Linkage Row*: Doctor's NPI.
-*   **`LOCATIONID`**:
-    *   *Rendering Row*: Doctor's NPI.
-    *   *Billing Row*: Clinic's Tax ID / `LOCATIONTIN` (e.g. `123456789`).
-    *   *Linkage Row*: Clinic's Tax ID / `LOCATIONTIN` (e.g. `123456789`).
-*   **`LOCATIONDESC`**:
-    *   *Rendering Row*: Doctor's Name.
-    *   *Billing Row*: Clinic Group Name.
-    *   *Linkage Row*: Clinic Group Name.
+---
 
-#### 2. Office & Contact Details
-*   **`LOCATIONTIN`**: Always holds the billing Tax ID (`123456789`) across all three rows for financial tracing.
-*   **Addresses (`LOCATIONADDRESS1` etc.)**: 
-    *   *Rendering Row*: Practice street address.
-    *   *Billing & Linkage Rows*: Coalesced to use the Clinic Group's address (`TIER2ADDRESS1` etc.), falling back to the rendering address if missing.
-*   **`LOCATIONRANKING`**: Statically set to `1` (indicating primary office location).
-*   **`DONOTCHASE`**: Mapped dynamically in the Silver query by joining against `silver.ref_credentialing` on `PROVIDERID` (defaults to `'N'`).
-*   **Contact Info**: `PHONENUMBER`, `FAXNUMBER`, and `CONTACTPERSON` are extracted from the `PER` segment and map to office administrative numbers.
+#### 1. CLIENT_ID
+*   **Source**: Extracted from the outer envelope's Interchange Sender ID (`ISA06`).
+*   **Behavior in Split**: Projected uniformly as `h.CLIENT_ID` (value: `'SENDERID'`) across all 3 rows.
+*   **Purpose**: Used for multi-tenant database partitioning. It allows filtering of data belonging to a specific sender or insurance plan.
 
-#### 3. Organizational Tiers (Tiers 2-4)
-*   **`TIER2ID` / `TIER2DESC` (Clinic Group)**: Resolved via `ref_provider_affiliation` or the parent `NM1*85` segment. Represents the hospital/clinic group organization (e.g. Johns Hopkins Hospital, NPI `1992837465`).
-*   **`TIER3ID` / `TIER3DESC` (Health System)**: Represents the overarching corporate parent system (e.g. Johns Hopkins Medicine). Resolved via `ref_provider_affiliation`.
-*   **`TIER4ID` / `TIER4DESC` (Network/Payer)**: Represents the payer network (e.g. Aetna). Defaults to null.
+---
 
-#### 4. Audit & Change Tracking Metadata
-*   **`CLIENT_ID` / `FILE_ID` / `LOAD_DATETIME`**: Extracted from interchange wrappers to track data lineage and multi-tenant plan partitions.
-*   **`HashKey`**: A 64-character SHA-256 hash string generated dynamically across all row values. Used in downstream Gold merges to quickly detect changed records and execute SCD Type 2 upserts.
+#### 2. FILE_ID
+*   **Source**: Extracted from the Interchange Control Number (`ISA13`).
+*   **Behavior in Split**: Projected uniformly as `h.FILE_ID` (value: `'000000123'`) across all 3 rows.
+*   **Purpose**: Establishes data lineage and audit tracking. If a record contains invalid data, you can look up `FILE_ID` to find the exact raw file that imported it.
+
+---
+
+#### 3. LOAD_DATETIME
+*   **Source**: Generated dynamically by the Spark ingestion notebook using `current_timestamp()`.
+*   **Behavior in Split**: Projected uniformly as the load timestamp across all 3 rows.
+*   **Purpose**: Determines data freshness and aids incremental daily loads.
+
+---
+
+#### 4. FILE_LAYOUT_ID & FILE_LAYOUT_DESCRIPTION
+*   **Source**: Statically configured in `Provider_Pipeline.ipynb` (values: `'274'` and `'Standard274'`).
+*   **Behavior in Split**: Projected uniformly across all 3 rows.
+*   **Purpose**: Identifies the mapping layout structure. This helps downstream processes differentiate 274 directory records from 834 member or 837 claim records in a shared data lake.
+
+---
+
+#### 5. PROVIDERID
+*   **Source & Behavior in Split**:
+    *   *Rendering Row*: Doctor's NPI (e.g. `'1982736452'`) from the `NM1*1P` segment.
+    *   *Billing Row*: Clinic's Tax ID / `LOCATIONTIN` (e.g. `'123456789'`).
+    *   *Linkage Row*: Doctor's NPI (e.g. `'1982736452'`).
+*   **Purpose**: Serves as the primary identification key for the entity represented by the row (the Doctor or the Clinic). In the Linkage row, it serves as the parent NPI.
+
+---
+
+#### 6. PROVIDERLASTNAME
+*   **Source & Behavior in Split**:
+    *   *Rendering Row*: Doctor's combined Full Name (e.g. `'JOHN M DOE'`).
+    *   *Billing Row*: Name of the Billing Clinic/Hospital (e.g. `'JOHNS HOPKINS HOSPITAL'`), resolved via `coalesce(TIER2DESC, PROVIDERLASTNAME)`.
+    *   *Linkage Row*: Doctor's combined Full Name (e.g. `'JOHN M DOE'`).
+*   **Purpose**: Provides the primary human-readable display name for the entity in database reports.
+
+---
+
+#### 7. PROVIDERNPI
+*   **Source & Behavior in Split**:
+    *   *Rendering Row*: Doctor's individual NPI (`'1982736452'`).
+    *   *Billing Row*: Clinic's Group NPI (`TIER2ID` e.g. `'1992837465'`).
+    *   *Linkage Row*: Doctor's individual NPI.
+*   **Purpose**: Stores the universal 10-digit National Provider Identifier required to validate and match medical insurance claims.
+
+---
+
+#### 8. LOCATIONGROUPID
+*   **Source**: Mapped from the Submitter ID (`NM1*41`) or Billing Provider ID (`NM1*85`).
+*   **Behavior in Split**: Projected uniformly as `'AETNA123'`.
+*   **Purpose**: Identifies the payer's internal network or contract plan grouping under which this directory record is registered.
+
+---
+
+#### 9. LOCATIONRANKING
+*   **Source**: Statically initialized as `1`.
+*   **Behavior in Split**: Projected uniformly as `1`.
+*   **Purpose**: Marks the location priority. A rank of `1` indicates this location is the provider's primary office. Secondary locations are ranked higher (`2`, `3`, etc.).
+
+---
+
+#### 10. LOCATIONIDTYPE
+*   **Source**: Calculated dynamically in the Silver query.
+*   **Behavior in Split**:
+    *   *Rendering Row*: Hardcoded to **`'rendering'`**.
+    *   *Billing Row*: Hardcoded to **`'billing'`**.
+    *   *Linkage Row*: Hardcoded to **`'rendering to billing'`**.
+*   **Purpose**: The core discriminator column. It defines the structural role of the row so downstream analytical scripts can tell doctors, clinics, and relationships apart.
+
+---
+
+#### 11. LOCATIONID
+*   **Source & Behavior in Split**:
+    *   *Rendering Row*: Doctor's individual NPI (`'1982736452'`).
+    *   *Billing Row*: Clinic's Tax ID / `LOCATIONTIN` (`'123456789'`).
+    *   *Linkage Row*: Clinic's Tax ID / `LOCATIONTIN` (`'123456789'`).
+*   **Purpose**: Identifies the target parent location or organization ID. In the Linkage row, this represents the target clinic where the doctor renders services.
+
+---
+
+#### 12. LOCATIONDESC
+*   **Source & Behavior in Split**:
+    *   *Rendering Row*: Doctor's combined Full Name (`'JOHN M DOE'`).
+    *   *Billing Row*: Clinic Group Name (`'JOHNS HOPKINS HOSPITAL'`).
+    *   *Linkage Row*: Clinic Group Name (`'JOHNS HOPKINS HOSPITAL'`).
+*   **Purpose**: Serves as the display description for the clinic location or practice.
+
+---
+
+#### 13. LOCATIONTIN
+*   **Source**: Mapped from the `REF*EI` (Employer ID) segment.
+*   **Behavior in Split**: Projected uniformly as `'123456789'` across all 3 rows.
+*   **Purpose**: Records the Tax Identification Number of the location. Essential for routing financial payments to the correct organization.
+
+---
+
+#### 14. Addresses (LOCATIONADDRESS1, LOCATIONADDRESS2, LOCATIONCITY, LOCATIONSTATE, LOCATIONZIP)
+*   **Source**: Mapped from `N3` (street) and `N4` (city/state/zip) loops.
+*   **Behavior in Split**:
+    *   *Rendering Row*: Practice location address lines (`'600 N WOLFE ST'`, `'STE 300'`, `'BALTIMORE'`, `'MD'`, `'21287'`).
+    *   *Billing & Linkage Rows*: Coalesced to use the Clinic Group's address (`TIER2ADDRESS1` etc.), falling back to the practice address if empty.
+*   **Purpose**: Stores physical address data for directory geo-searching and claims address-matching.
+
+---
+
+#### 15. County & Contact Info (COUNTYCODE, PHONENUMBER, FAXNUMBER, CONTACTPERSON)
+*   **Source**: Mapped from the contact `PER` loop.
+*   **Behavior in Split**:
+    *   `COUNTYCODE` and `FAXNUMBER` evaluate to `null` (placeholder).
+    *   `PHONENUMBER` evaluates to `'4105551111'`.
+    *   `CONTACTPERSON` evaluates to `'MAIN APPOINTMENTS'`.
+*   **Purpose**: Direct contact channels for appointment scheduling or administrative inquiries.
+
+---
+
+#### 16. DONOTCHASE
+*   **Source**: Mapped by joining the `silver.ref_credentialing` reference table on NPI.
+*   **Behavior in Split**: Defaults to `'N'` (No) if unmapped in reference tables.
+*   **Purpose**: Operational flag for the provider relations team. `'Y'` (Yes) means do not call the doctor's office for credential updates (e.g. if they are part of an auto-updated health system). `'N'` (No) allows phone follow-up.
+
+---
+
+#### 17. TIER2ID & TIER2DESC (Clinic Group)
+*   **Source**: Parent `NM1*85` segment or the `ref_provider_affiliation` reference table.
+*   **Behavior in Split**: Maps to the hospital/clinic group organization (NPI: `'1992837465'`, Description: `'JOHNS HOPKINS HOSPITAL'`).
+*   **Purpose**: Identifies the Tier 2 Clinic Group organization that the practitioner renders services under.
+
+---
+
+#### 18. TIER3ID & TIER3DESC (Health System)
+*   **Source**: Resolved by joining the `ref_provider_affiliation` reference table in the Silver layer.
+*   **Behavior in Split**: Evaluates to the Health System name (e.g. *Johns Hopkins Medicine*). In our test run, it evaluates to `null` due to empty reference tables.
+*   **Purpose**: Identifies the Tier 3 corporate parent corporation for negotiations and grouping.
+
+---
+
+#### 19. TIER4ID & TIER4DESC (Network/Payer)
+*   **Source**: Evaluates to `null`.
+*   **Purpose**: Placeholder for mapping the doctor to specific insurance plans/networks.
+
+---
+
+#### 20. STARTDATE & ENDDATE
+*   **Source**: Mapped from `DTP*007` (Effective Date) and `DTP*008` (Expiration Date).
+*   **Behavior in Split**: `STARTDATE` evaluates to `'20260628'` and `ENDDATE` is `null`.
+*   **Purpose**: Establishes the relationship's active validity timeline to match against service dates on claims.
+
+---
+
+#### 21. HashKey
+*   **Source**: Spark-generated SHA-256 hash across all row values.
+*   **Purpose**: acts as a unique signature of the row content to quickly detect changed records and execute SCD Type 2 upserts in the Gold layer.
 
 ---
 
