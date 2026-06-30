@@ -54,6 +54,8 @@ claimprocessing_provider274/
 │   └── 274/
 │       └── pending/
 └── temp/
+|
+|__ log/
 ```
 
 ---
